@@ -1,4 +1,3 @@
-use std::mem;
 use std::time::Duration;
 
 use io_uring::{
@@ -112,7 +111,16 @@ impl Platform {
     }
 
     pub fn reset(&mut self) {
-        _ = mem::replace(&mut self.ring, new_io_uring().unwrap());
+        // To get rid of pending IO we drop the current `io_uring` and
+        // replace with a new one. We also don't unwrap `InitErrors` here
+        // because since `init()` has already been succesfully called
+        // once at this point we can be confident that creating a new
+        // `io_uring` will be successful
+        self.ring = new_io_uring().unwrap();
+
+        self.submitted_timeouts = IntMap::default();
+        self.completed_timeouts = IntSet::default();
+        self.timespec_store = Vec::new();
     }
 }
 

@@ -34,6 +34,38 @@ pub fn init() -> Result<(), InitError> {
 }
 
 /// Runs a future on the current thread, blocking it whenever waiting for IO
+/// 
+/// The passed future will be considered the "root task". The root task can
+/// use [`spawn()`] to spawn child tasks. The function returns the root task's
+/// result as soon as it has finished, and all pending child tasks will be dropped.
+/// 
+/// Use the child tasks' [`JoinHandle`]s if you want to wait for them to complete
+/// before returning. Remember to call [`init()`] atleast once on a thread before
+/// using [`run()`]
+/// 
+/// # Examples
+/// ```
+/// use takyon::time::sleep_secs;
+/// 
+/// // Initialize the thread-local runtime
+/// takyon::init().unwrap();
+/// 
+/// // Run a future
+/// let result = takyon::run(async {
+///     sleep_secs(1).await;
+///     println!("1 second passed");
+/// 
+///     sleep_secs(1).await;
+///     println!("2 seconds passed");
+/// 
+///     let result = do_something().await;
+/// 
+///     result
+/// });
+/// 
+/// // Use the result returned by the future
+/// println!("{result}");
+/// ```
 pub fn run<F: Future>(root_task: F) -> F::Output {
     RUNNING.set(true);
 
@@ -83,6 +115,15 @@ pub fn run<F: Future>(root_task: F) -> F::Output {
     }
 }
 
+/// Spawns a new task and returns it's [`JoinHandle`]
+/// 
+/// The new task immediately runs concurrently with the current task without needing to
+/// `await` it. The returned [`JoinHandle`] can be used to wait for the task to finish
+/// 
+/// See the [`JoinHandle`] docs for an example of using this function
+/// 
+/// # Panics
+/// This can only be used within a [`run()`] call and will panic if used outside it
 pub fn spawn<F: Future + 'static>(task: F) -> JoinHandle<F::Output> {
     if !RUNNING.get() {
         panic!("takyon::spawn() called outside of a takyon::run() call!")

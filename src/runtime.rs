@@ -81,6 +81,12 @@ impl Runtime {
         self.task_wakeups = vec![0];
         self.plat.reset();
 
+        // Instead of simply clearing the task list, we replace it and
+        // give ownership of the tasks to `run()`. This prevents double
+        // borrows of the thread local runtime since task destructors
+        // may also borrow it (to cancel IO for example).
+        // This way the tasks will be dropped inside `run()` where
+        // each task can get exclusive access to the Runtime
         mem::replace(&mut self.tasks, IntMap::default())
     }
 

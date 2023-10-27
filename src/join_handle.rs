@@ -6,6 +6,32 @@ use std::task::{Context, Poll};
 
 use crate::{RUNTIME, runtime::TaskId};
 
+/// A handle to a spawned task
+/// 
+/// This is a future that can be `await`ed to wait for a task to complete and
+/// obtain its result. However this handle does not need to be awaited for the
+/// task to run. If the handle is dropped then the task will continue to run
+/// but it's result will be lost
+/// 
+/// # Examples
+/// ```
+/// takyon::run(async {
+///     // Spawn a task to do some work
+///     let handle = takyon::spawn(async {
+///         let result = do_something().await;
+///         println!("Something done");
+///         result
+///     });
+/// 
+///     // Meanwhile do some other work
+///     do_something_else().await;
+///     println!("Something else done");
+/// 
+///     // Wait for the task to finish
+///     let task_result = handle.await;
+///     println!("{task_result}");
+/// });
+/// ```
 pub struct JoinHandle<T: 'static> {
     id: TaskId,
     registered: Cell<bool>,
