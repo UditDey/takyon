@@ -1,46 +1,38 @@
 use std::pin::Pin;
-use std::time::Duration;
 use std::future::Future;
+use std::time::Duration;
 use std::task::{Context, Poll};
 
-use crate::{
-    Error,
-    executor::{Executor, IoKey}
-};
+use crate::{RUNTIME, runtime::IoKey};
 
-pub struct Sleep<'a> {
-    key: Option<IoKey>,
+/// Future which waits for a certain duration of time
+pub struct Sleep {
     dur: Duration,
-    exec: &'a Executor
+    key: Option<IoKey>
 }
 
-impl<'a> Sleep<'a> {
-    pub fn new(exec: &'a Executor, dur: Duration) -> Self {
-        Self { key: None, dur, exec }
+impl Sleep {
+    pub fn new(dur: Duration) -> Self {
+        Self { dur, key: None }
     }
 }
 
-impl<'a> Future for Sleep<'a> {
-    type Output = Result<(), Error>;
+impl Future for Sleep {
+    type Output = ();
 
     fn poll(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match &self.key {
+        match self.key {
+            // Timeout has not been pushed yet
             None => {
-                let res = self.exec.push_timeout(self.dur);
-
-                match res {
-                    Ok(key) => {
-                        self.key = Some(key);
-                        Poll::Pending
-                    },
-                    Err(err) => Poll::Ready(Err(err))
-                }
+                self.key = Some(RUNTIME.with_borrow_mut(|rt| rt.push_timeout(self.dur)));
+                Poll::Pending
             },
 
+            // Timeout has been pushed, try to pop it to see if it's completed
             Some(key) => {
-                if self.exec.pop_timeout(*key) {
+                if RUNTIME.with_borrow_mut(|rt| rt.pop_timeout(key)) {
                     self.key = None;
-                    Poll::Ready(Ok(()))
+                    Poll::Ready(())
                 }
                 else {
                     Poll::Pending
@@ -50,14 +42,31 @@ impl<'a> Future for Sleep<'a> {
     }
 }
 
-impl<'a> Drop for Sleep<'a> {
+impl Drop for Sleep {
     fn drop(&mut self) {
-        if let Some(io_key) = self.key {
-            self.exec.cancel_timeout(io_key).expect("Failed to cancel timeout");
+        if let Some(key) = self.key {
+            RUNTIME.with_borrow_mut(|rt| rt.cancel_timeout(key));
         }
     }
 }
 
-pub async fn sleep(exec: &Executor, ms: u64) -> Result<(), Error> {
-    Sleep::new(exec, Duration::from_millis(ms)).await
+/// Wait for the specified number of milliseconds
+/// 
+/// Convenience function for [`Sleep`]
+pub async fn sleep_millis(dur: u64) {
+    Sleep::new(Duration::from_millis(dur)).await
+}
+
+/// Wait for the specified number of milliseconds
+/// 
+/// Convenience function for [`Sleep`]
+pub async fn sleep_micros(dur: u64) {
+    Sleep::new(Duration::from_micros(dur)).await
+}
+
+/// Wait for the specified number of milliseconds
+/// 
+/// Convenience function for [`Sleep`]
+pub async fn sleep_secs(dur: u64) {
+    Sleep::new(Duration::from_secs(dur)).await
 }

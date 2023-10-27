@@ -1,14 +1,21 @@
-use takyon::{time, Error, fs::File};
+use takyon::time::sleep_secs;
 
-pub fn main() -> Result<(), Error> {
-    takyon::run!(async |exec| {
-        println!("Opening file...");
+pub fn main() {
+    takyon::init().unwrap();
 
-        File::create(exec, "/home/uditd/Desktop/Projects/takyon/test_file").await?;
-        
-        println!("Done");
-        time::sleep(exec, 800).await?;
+    let num = takyon::run(async {
+        let task_1 = takyon::spawn(async {
+            sleep_secs(3).await;
+            9
+        });
 
-        Ok(())
-    })?
+        sleep_secs(1).await;
+        println!("lol");
+
+        let task_2 = takyon::spawn(async { task_1.await });
+
+        task_2.await
+    });
+
+    println!("{num}");
 }
