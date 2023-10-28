@@ -13,6 +13,11 @@ use crate::{RUNTIME, runtime::TaskId};
 /// task to run. If the handle is dropped then the task will continue to run
 /// but it's result will be lost
 /// 
+/// # Safety
+/// A [`JoinHandle`] is valid only inside the [`run()`](crate::run) call that
+/// it was produced within. Please don't try to use a join handle from one
+/// [`run()`](crate::run) call in another
+/// 
 /// # Examples
 /// ```
 /// takyon::run(async {

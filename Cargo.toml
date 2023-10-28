@@ -2,6 +2,12 @@
 name = "takyon"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+description = "A simple, single threaded async runtime"
+repository = "https://github.com/UditDey/takyon/"
+readme = "README.md"
+keywords = ["async", "runtime", "io_uring"]
+categories = ["asynchronous", "filesystem", "network-programming"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

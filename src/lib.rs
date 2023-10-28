@@ -48,7 +48,7 @@ pub fn init() -> Result<(), InitError> {
 /// use takyon::time::sleep_secs;
 /// 
 /// // Initialize the thread-local runtime
-/// takyon::init().unwrap();
+/// takyon::init()?;
 /// 
 /// // Run a future
 /// let result = takyon::run(async {
