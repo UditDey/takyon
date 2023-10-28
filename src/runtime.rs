@@ -9,11 +9,9 @@ use nohash::IntMap;
 use crate::{
     JoinHandle,
     platform::Platform,
-    error::InitError
+    error::InitError,
+    key::{IoKey, TaskId},
 };
-
-pub type IoKey = u32;
-pub type TaskId = u32;
 
 type Task = Pin<Box<dyn Future<Output = Box<dyn Any>>>>;
 
@@ -44,41 +42,41 @@ impl Runtime {
         let plat = Platform::new()?;
 
         Ok(Self {
-            io_key_counter: 0,
-            task_id_counter: 1,
-            current_task: 0,
+            io_key_counter: 0.into(),
+            task_id_counter: 1.into(),
+            current_task: 0.into(),
             tasks: IntMap::default(),
             join_handles: IntMap::default(),
-            task_wakeups: vec![0], // We always start with the root task already woken up
+            task_wakeups: vec![0.into()], // We always start with the root task already woken up
             plat
         })
     }
 
     fn new_io_key(&mut self) -> IoKey {
         let key = self.io_key_counter;
-        self.io_key_counter = key.wrapping_add(1);
+        self.io_key_counter.inner = key.inner.wrapping_add(1);
 
         key
     }
 
     fn new_task_id(&mut self) -> TaskId {
         let id = self.task_id_counter;
-        self.task_id_counter += id.wrapping_add(1);
+        self.task_id_counter.inner = id.inner.wrapping_add(1);
 
         // TaskId 0 is reserved for the root task
-        if self.task_id_counter == 0 {
-            self.task_id_counter = 1;
+        if self.task_id_counter.inner == 0 {
+            self.task_id_counter.inner = 1;
         }
 
         id
     }
 
     pub fn reset(&mut self) -> IntMap<TaskId, Task> {
-        self.io_key_counter = 0;
-        self.task_id_counter = 1;
-        self.current_task = 0;
+        self.io_key_counter = 0.into();
+        self.task_id_counter = 1.into();
+        self.current_task = 0.into();
         self.join_handles = IntMap::default();
-        self.task_wakeups = vec![0];
+        self.task_wakeups = vec![0.into()];
         self.plat.reset();
 
         // Instead of simply clearing the task list, we replace it and
@@ -141,7 +139,7 @@ impl Runtime {
         let id = self.task_wakeups.pop()?;
         self.current_task = id;
 
-        if id == 0 {
+        if id.inner == 0 {
             Some(WokenTask::RootTask)
         }
         else {

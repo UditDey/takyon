@@ -12,7 +12,7 @@ use nohash::{IntSet, IntMap};
 
 use crate::{
     error::InitError,
-    runtime::{IoKey, TaskId},
+    key::{IoKey, TaskId},
 };
 
 pub struct Platform {
@@ -72,7 +72,7 @@ impl Platform {
 
         let sqe = opcode::Timeout::new(timespec.as_ref())
             .build()
-            .user_data(key as u64);
+            .user_data(key.inner as u64);
 
         self.timespec_store.push(timespec);
         self.submit_sqe(sqe);
@@ -83,7 +83,7 @@ impl Platform {
             panic!("Specified key not found in submitted timeouts, maybe wrong key was used?");
         }
 
-        let sqe = opcode::TimeoutRemove::new(key as u64).build();
+        let sqe = opcode::TimeoutRemove::new(key.inner as u64).build();
         self.submit_sqe(sqe);
     }
 
@@ -100,7 +100,7 @@ impl Platform {
         self.clear_stores();
 
         for cqe in self.ring.completion() {
-            let key = cqe.user_data() as IoKey;
+            let key = IoKey::from(cqe.user_data() as u32);
 
             // Is this a timeout?
             if let Some(task_id) = self.submitted_timeouts.remove(&key) {

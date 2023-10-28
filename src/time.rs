@@ -3,7 +3,7 @@ use std::future::Future;
 use std::time::Duration;
 use std::task::{Context, Poll};
 
-use crate::{RUNTIME, runtime::IoKey};
+use crate::{RUNTIME, key::IoKey};
 
 /// Future which waits for a certain duration of time
 pub struct Sleep {
