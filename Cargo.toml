@@ -12,7 +12,6 @@ categories = ["asynchronous", "filesystem", "network-programming"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-thiserror = "1.0.49"
 nohash = "0.2.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]

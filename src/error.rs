@@ -1,23 +1,26 @@
 use std::io;
+use std::error::Error;
+use std::fmt::{self, Display, Formatter};
 
-use thiserror::Error;
-
-#[derive(Error, Debug)]
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
 pub enum InitError {
-    // Linux specific errors  
-    #[cfg(target_os = "linux")]
-    #[error("Failed to create io_uring ({0})")]
     IoUringCreationFailed(io::Error),
-
-    #[cfg(target_os = "linux")]
-    #[error("io_uring feature `{0}` is required but not supported on current kernel")]
     IoUringFeatureNotPresent(&'static str),
-
-    #[cfg(target_os = "linux")]
-    #[error("Failed to probe supported io_uring opcodes ({0})")]
     IoUringProbeFailed(io::Error),
-
-    #[cfg(target_os = "linux")]
-    #[error("io_uring opcode `{0}` is required but not supported on current kernel")]
     IoUringOpcodeUnsupported(&'static str)
 }
+
+#[cfg(target_os = "linux")]
+impl Display for InitError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::IoUringCreationFailed(err) => write!(f, "Failed to create io_uring ({0})", err),
+            Self::IoUringFeatureNotPresent(msg) => write!(f, "io_uring feature `{0}` is required but not supported on current kernel", msg),
+            Self::IoUringProbeFailed(err) => write!(f, "Failed to probe supported io_uring opcodes ({0})", err),
+            Self::IoUringOpcodeUnsupported(msg) => write!(f, "io_uring opcode  `{0}` is required but not supported on current kernel", msg)
+        }
+    }
+}
+
+impl Error for InitError {}
