@@ -1,6 +1,7 @@
 use std::io;
 use std::mem;
 use std::ptr;
+use std::array;
 use std::pin::Pin;
 use std::os::fd::RawFd;
 use std::future::Future;
@@ -338,6 +339,7 @@ fn convert_socket_addr(addr: &libc::sockaddr) -> SocketAddr {
         // Reinterpret as sockaddr_in
         let addr = unsafe { &*(addr as *const libc::sockaddr as *const libc::sockaddr_in) };
 
+        // Get address params, converting from network endianness to host endianness
         let ip = Ipv4Addr::from(u32::from_be(addr.sin_addr.s_addr));
         let port = u16::from_be(addr.sin_port);
         
@@ -349,7 +351,15 @@ fn convert_socket_addr(addr: &libc::sockaddr) -> SocketAddr {
         // Reinterpret as sockaddr_in6
         let addr = unsafe { &*(addr as *const libc::sockaddr as *const libc::sockaddr_in6) };
 
-        let ip = Ipv6Addr::from(addr.sin6_addr.s6_addr);
+        // Get address params, converting from network endianness to host endianness
+        let segments = array::from_fn(|i| {
+            let octet_1 = addr.sin6_addr.s6_addr[i * 2] as u16;
+            let octet_2 = addr.sin6_addr.s6_addr[(i * 2) + 1] as u16;
+
+            u16::from_be(octet_1 << 8 | octet_2)
+        });
+
+        let ip = Ipv6Addr::from(segments);
         let port = u16::from_be(addr.sin6_port);
         let flowinfo = u32::from_be(addr.sin6_flowinfo);
         let scope_id = u32::from_be(addr.sin6_scope_id);
