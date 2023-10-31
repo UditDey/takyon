@@ -82,7 +82,7 @@ pub fn run<F: Future>(root_task: F) -> F::Output {
 
             match task {
                 // Root task woken up
-                Some(WokenTask::RootTask) => {
+                Some(WokenTask::Root) => {
                     let poll = root_task.as_mut().poll(&mut cx);
 
                     // Root task finished, reset runtime and return
@@ -94,7 +94,7 @@ pub fn run<F: Future>(root_task: F) -> F::Output {
                 },
     
                 // Child task woken up
-                Some(WokenTask::ChildTask(mut task)) => {
+                Some(WokenTask::Child(mut task)) => {
                     let poll = task.as_mut().poll(&mut cx);
 
                     match poll {

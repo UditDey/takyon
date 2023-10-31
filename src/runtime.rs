@@ -1,8 +1,10 @@
+use std::io;
 use std::mem;
 use std::any::Any;
 use std::pin::Pin;
 use std::future::Future;
 use std::time::Duration;
+use std::net::SocketAddr;
 
 use nohash::IntMap;
 
@@ -14,11 +16,14 @@ use crate::{
 
 pub type TaskId = u32;
 
+#[cfg(unix)]
+pub type SocketHandle = std::os::fd::RawFd;
+
 type Task = Pin<Box<dyn Future<Output = Box<dyn Any>>>>;
 
 pub enum WokenTask {
-    RootTask,
-    ChildTask(Task)
+    Root,
+    Child(Task)
 }
 
 struct JoinHandleInfo {
@@ -132,7 +137,7 @@ impl Runtime {
             self.current_task = id;
 
             if id == 0 {
-                return Some(WokenTask::RootTask);
+                return Some(WokenTask::Root);
             }
             else {
                 // Note that its possible for a woken up task id to not be present in the list
@@ -140,7 +145,7 @@ impl Runtime {
                 // all of them, in that case this `id` will no longer be found in the task list
                 // and we should continue with the next id
                 match self.tasks.remove(&id) {
-                    Some(task) => return Some(WokenTask::ChildTask(task)),
+                    Some(task) => return Some(WokenTask::Child(task)),
                     None => continue
                 }
             }
@@ -211,5 +216,9 @@ impl Runtime {
 impl Runtime {
     pub fn sleep_fut(&self, dur: Duration) -> impl Future<Output = ()> {
         self.plat.sleep_fut(dur)
+    }
+
+    pub fn recv_from_fut<'a>(&self, sock: SocketHandle, buf: &'a mut [u8]) -> impl Future<Output = io::Result<(usize, SocketAddr)>> + 'a {
+        self.plat.recv_from_fut(sock, buf)
     }
 }

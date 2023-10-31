@@ -1,21 +1,34 @@
-use takyon::time::sleep_secs;
+use takyon::{
+    time::sleep_secs,
+    net::UdpSocket
+};
 
 pub fn main() {
     takyon::init().unwrap();
 
-    let num = takyon::run(async {
-        let task_1 = takyon::spawn(async {
-            sleep_secs(3).await;
-            9
+    takyon::run(async {
+        takyon::spawn(async {
+            let mut i = 0;
+
+            loop {
+                sleep_secs(1).await;
+                println!("Tick {i}");
+                i += 1;
+            }
         });
 
-        sleep_secs(1).await;
-        println!("lol");
+        let sock = UdpSocket::bind("127.0.0.1:5000").unwrap();
+        let mut buf = [0; 2048];
 
-        let task_2 = takyon::spawn(async { task_1.await });
+        loop {
+            let (bytes, src_addr) = sock.recv_from(&mut buf).await.unwrap();
 
-        task_2.await
+            println!("Read {:?} bytes from address {:?}", bytes, src_addr);
+            println!("Data: {:02X?}\n", &buf[..bytes]);
+
+            if &buf[..bytes] == &[0xB0, 0x0B] {
+                break;
+            }
+        }
     });
-
-    println!("{num}");
 }
