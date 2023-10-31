@@ -16,9 +16,6 @@ pub type TaskId = u32;
 
 type Task = Pin<Box<dyn Future<Output = Box<dyn Any>>>>;
 
-#[cfg(unix)]
-pub type SocketHandle = std::os::fd::RawFd;
-
 pub enum WokenTask {
     RootTask,
     ChildTask(Task)
@@ -130,15 +127,23 @@ impl Runtime {
     }
 
     pub fn get_woken_task(&mut self) -> Option<WokenTask> {
-        let id = self.task_wakeups.pop()?;
-        self.current_task = id;
+        loop {
+            let id = self.task_wakeups.pop()?;
+            self.current_task = id;
 
-        if id == 0 {
-            Some(WokenTask::RootTask)
-        }
-        else {
-            let task = self.tasks.remove(&id).expect("Woken up task not found in task list");
-            Some(WokenTask::ChildTask(task))
+            if id == 0 {
+                return Some(WokenTask::RootTask);
+            }
+            else {
+                // Note that its possible for a woken up task id to not be present in the list
+                // This happens when a task has multiple wakeups, but completes before processing
+                // all of them, in that case this `id` will no longer be found in the task list
+                // and we should continue with the next id
+                match self.tasks.remove(&id) {
+                    Some(task) => return Some(WokenTask::ChildTask(task)),
+                    None => continue
+                }
+            }
         }
     }
 
