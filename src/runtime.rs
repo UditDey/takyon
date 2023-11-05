@@ -1,10 +1,11 @@
 use std::io;
 use std::mem;
 use std::any::Any;
+use std::os::fd::AsRawFd;
 use std::pin::Pin;
 use std::future::Future;
 use std::time::Duration;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 
 use nohash::IntMap;
 
@@ -17,7 +18,14 @@ use crate::{
 pub type TaskId = u32;
 
 #[cfg(unix)]
-pub type SocketHandle = std::os::fd::RawFd;
+pub struct SocketHandle(pub std::os::fd::RawFd);
+
+impl From<&UdpSocket> for SocketHandle {
+    fn from(value: &UdpSocket) -> Self {
+        #[cfg(unix)]
+        Self(value.as_raw_fd())
+    }
+}
 
 type Task = Pin<Box<dyn Future<Output = Box<dyn Any>>>>;
 
@@ -218,7 +226,21 @@ impl Runtime {
         self.plat.sleep_fut(dur)
     }
 
-    pub fn recv_from_fut<'a>(&self, sock: SocketHandle, buf: &'a mut [u8]) -> impl Future<Output = io::Result<(usize, SocketAddr)>> + 'a {
-        self.plat.recv_from_fut(sock, buf)
+    pub fn recv_from_fut<'a>(&self, sock: SocketHandle, buf: &'a mut [u8], peek: bool) -> impl Future<Output = io::Result<(usize, SocketAddr)>> + 'a {
+        self.plat.recv_from_fut(sock, buf, peek)
+    }
+
+    pub fn send_fut<'a>(&self, sock: SocketHandle, buf: &'a [u8]) -> impl Future<Output = io::Result<usize>> + 'a {
+        self.plat.send_to_fut(sock, buf, None)
+    }
+
+    pub fn send_to_fut<'a>(&self, sock: SocketHandle, buf: &'a [u8], addr: impl ToSocketAddrs) -> impl Future<Output = io::Result<usize>> + 'a {
+        let addr = addr
+            .to_socket_addrs()
+            .expect("Could not get address iterator")
+            .next()
+            .expect("Address iterator didn't provide any addresses");
+
+        self.plat.send_to_fut(sock, buf, Some(addr))
     }
 }
