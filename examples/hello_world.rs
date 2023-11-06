@@ -1,27 +1,30 @@
-use takyon::{
-    time::sleep_secs,
-    net::TcpListener
-};
+use takyon::net::TcpListener;
 
 pub fn main() {
     takyon::init().unwrap();
 
     takyon::run(async {
-        takyon::spawn(async {
-            let mut i = 0;
-
-            loop {
-                sleep_secs(1).await;
-                println!("Tick {i}");
-                i += 1;
-            }
-        });
-
         let sock = TcpListener::bind("127.0.0.1:5000").unwrap();
 
         loop {
-            let (_stream, src_addr) = sock.accept().await.unwrap();
-            println!("Got connection from {:?}", src_addr);
+            let (stream, src_addr) = sock.accept().await.unwrap();
+            println!("New connection from {:?}\n", src_addr);
+
+            takyon::spawn(async move {
+                let mut buf = [0; 2048];
+
+                loop {
+                    let bytes = stream.read(&mut buf).await.unwrap();
+
+                    if bytes == 0 {
+                        println!("Address {:?} disconnected\n", src_addr);
+                        break;
+                    }
+
+                    println!("Read {:?} bytes from address {:?}", bytes, src_addr);
+                    println!("Data: {:02X?}\n", &buf[..bytes]);
+                }
+            });
         }
     });
 }

@@ -5,7 +5,7 @@ use std::os::fd::AsRawFd;
 use std::pin::Pin;
 use std::future::Future;
 use std::time::Duration;
-use std::net::{SocketAddr, ToSocketAddrs, UdpSocket, TcpListener, TcpStream};
+use std::net::{SocketAddr, ToSocketAddrs, TcpStream};
 
 use nohash::IntMap;
 
@@ -20,16 +20,8 @@ pub type TaskId = u32;
 #[cfg(unix)]
 pub struct SocketHandle(pub std::os::fd::RawFd);
 
-impl From<&UdpSocket> for SocketHandle {
-    fn from(value: &UdpSocket) -> Self {
-        #[cfg(unix)]
-        Self(value.as_raw_fd())
-    }
-}
-
-impl From<&TcpListener> for SocketHandle {
-    fn from(value: &TcpListener) -> Self {
-        #[cfg(unix)]
+impl<T: AsRawFd> From<&T> for SocketHandle {
+    fn from(value: &T) -> Self {
         Self(value.as_raw_fd())
     }
 }

@@ -16,6 +16,14 @@ impl TcpStream {
     pub fn std(&self) -> &std::net::TcpStream {
         &self.0
     }
+
+    pub async fn read(&self, buf: &mut [u8]) -> Result<usize> {
+        RUNTIME.with_borrow_mut(|rt| rt.recv_fut(SocketHandle::from(&self.0), buf, false)).await
+    }
+
+    pub async fn write(&self, buf: &[u8]) -> Result<usize> {
+        RUNTIME.with_borrow_mut(|rt| rt.send_fut(SocketHandle::from(&self.0), buf)).await
+    }
 }
 
 pub struct TcpListener(std::net::TcpListener);

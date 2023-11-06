@@ -17,7 +17,7 @@ use io_uring::{
     types::{Timespec, Fd}
 };
 
-use nohash::{IntSet, IntMap};
+use nohash::IntMap;
 
 use crate::{
     RUNTIME,
@@ -39,21 +39,8 @@ enum FutState {
 pub struct Platform {
     ring: IoUring,
     io_key_counter: IoKey,
-
-    submitted_timeouts: IntMap<IoKey, TaskId>,
-    completed_timeouts: IntSet<IoKey>,
-
-    submitted_recvs: IntMap<IoKey, TaskId>,
-    completed_recvs: IntMap<IoKey, io::Result<usize>>,
-
-    submitted_recv_msgs: IntMap<IoKey, TaskId>,
-    completed_recv_msgs: IntMap<IoKey, io::Result<usize>>,
-
-    submitted_send_msgs: IntMap<IoKey, TaskId>,
-    completed_send_msgs: IntMap<IoKey, io::Result<usize>>,
-
-    submitted_accepts: IntMap<IoKey, TaskId>,
-    completed_accepts: IntMap<IoKey, io::Result<TcpStream>>
+    submissions: IntMap<IoKey, TaskId>,
+    completions: IntMap<IoKey, i32>
 }
 
 impl Platform {
@@ -61,21 +48,8 @@ impl Platform {
         Ok(Self {
             ring: new_io_uring()?,
             io_key_counter: 0,
-
-            submitted_timeouts: IntMap::default(),
-            completed_timeouts: IntSet::default(),
-
-            submitted_recvs: IntMap::default(),
-            completed_recvs: IntMap::default(),
-
-            submitted_recv_msgs: IntMap::default(),
-            completed_recv_msgs: IntMap::default(),
-
-            submitted_send_msgs: IntMap::default(),
-            completed_send_msgs: IntMap::default(),
-
-            submitted_accepts: IntMap::default(),
-            completed_accepts: IntMap::default()
+            submissions: IntMap::default(),
+            completions: IntMap::default()
         })
     }
 
@@ -101,14 +75,14 @@ impl Platform {
                             .user_data(key as u64);
 
                         rt.plat.submit_sqe(sqe);
-                        rt.plat.submitted_timeouts.insert(key, rt.current_task);
+                        rt.plat.submissions.insert(key, rt.current_task);
 
                         Poll::Pending
                     }),
 
                     // Timeout submitted, query it
                     FutState::Submitted(key) => RUNTIME.with_borrow_mut(|rt| {
-                        if rt.plat.completed_timeouts.remove(&key) {
+                        if rt.plat.completions.remove(&key).is_some() {
                             self.state = FutState::Done;
                             Poll::Ready(())
                         }
@@ -126,7 +100,7 @@ impl Platform {
             fn drop(&mut self) {
                 if let FutState::Submitted(key) = &self.state {
                     RUNTIME.with_borrow_mut(|rt| {
-                        if rt.plat.submitted_timeouts.remove(key).is_some() {
+                        if rt.plat.submissions.remove(key).is_some() {
                             let sqe = opcode::TimeoutRemove::new(*key as u64).build();
                             rt.plat.submit_sqe(sqe);   
                         }
@@ -167,16 +141,18 @@ impl Platform {
                             .user_data(key as u64);
 
                         rt.plat.submit_sqe(sqe);
-                        rt.plat.submitted_recvs.insert(key, rt.current_task);
+                        rt.plat.submissions.insert(key, rt.current_task);
 
                         Poll::Pending
                     }),
 
                     // Recv submitted, query it
                     FutState::Submitted(key) => RUNTIME.with_borrow_mut(|rt| {
-                        match rt.plat.completed_recv_msgs.remove(&key) {
-                            Some(bytes) => {
+                        match rt.plat.completions.remove(&key) {
+                            Some(res) => {
                                 self.state = FutState::Done;
+
+                                let bytes = libc_result_to_std(res).map(|bytes| bytes as usize);
                                 Poll::Ready(bytes)
                             },
 
@@ -193,7 +169,7 @@ impl Platform {
             fn drop(&mut self) {
                 if let FutState::Submitted(key) = &self.state {
                     RUNTIME.with_borrow_mut(|rt| {
-                        if rt.plat.submitted_recvs.remove(key).is_some() {
+                        if rt.plat.submissions.remove(key).is_some() {
                             let sqe = opcode::AsyncCancel::new(*key as u64).build();
                             rt.plat.submit_sqe(sqe);   
                         }
@@ -235,21 +211,26 @@ impl Platform {
                             .user_data(key as u64);
 
                         rt.plat.submit_sqe(sqe);
-                        rt.plat.submitted_recv_msgs.insert(key, rt.current_task);
+                        rt.plat.submissions.insert(key, rt.current_task);
 
                         Poll::Pending
                     }),
 
                     // RecvMsg submitted, query it
                     FutState::Submitted(key) => RUNTIME.with_borrow_mut(|rt| {
-                        match rt.plat.completed_recv_msgs.remove(&key) {
-                            Some(bytes) => {
+                        match rt.plat.completions.remove(&key) {
+                            Some(res) => {
                                 self.state = FutState::Done;
 
-                                let src_addr = unsafe { &*self.src_addr };
-                                let src_addr = libc_addr_to_std(src_addr);
+                                let bytes = libc_result_to_std(res).map(|bytes| bytes as usize);
 
-                                let res = bytes.map(|bytes| (bytes, src_addr));
+                                let res = bytes.map(|bytes| {
+                                    let src_addr = unsafe { &*self.src_addr };
+                                    let src_addr = libc_addr_to_std(src_addr);
+
+                                    (bytes, src_addr)
+                                });
+
                                 Poll::Ready(res)
                             },
 
@@ -266,7 +247,7 @@ impl Platform {
             fn drop(&mut self) {
                 if let FutState::Submitted(key) = &self.state {
                     RUNTIME.with_borrow_mut(|rt| {
-                        if rt.plat.submitted_recv_msgs.remove(key).is_some() {
+                        if rt.plat.submissions.remove(key).is_some() {
                             let sqe = opcode::AsyncCancel::new(*key as u64).build();
                             rt.plat.submit_sqe(sqe);
                         }                        
@@ -333,16 +314,18 @@ impl Platform {
                             .user_data(key as u64);
 
                         rt.plat.submit_sqe(sqe);
-                        rt.plat.submitted_send_msgs.insert(key, rt.current_task);
+                        rt.plat.submissions.insert(key, rt.current_task);
 
                         Poll::Pending
                     }),
 
                     // SendMsg submitted, query it
                     FutState::Submitted(key) => RUNTIME.with_borrow_mut(|rt| {
-                        match rt.plat.completed_send_msgs.remove(&key) {
-                            Some(bytes) => {
+                        match rt.plat.completions.remove(&key) {
+                            Some(res) => {
                                 self.state = FutState::Done;
+
+                                let bytes = libc_result_to_std(res).map(|bytes| bytes as usize);
                                 Poll::Ready(bytes)
                             },
 
@@ -359,7 +342,7 @@ impl Platform {
             fn drop(&mut self) {
                 if let FutState::Submitted(key) = &self.state {
                     RUNTIME.with_borrow_mut(|rt| {
-                        if rt.plat.submitted_send_msgs.remove(key).is_some() {
+                        if rt.plat.submissions.remove(key).is_some() {
                             let sqe = opcode::AsyncCancel::new(*key as u64).build();
                             rt.plat.submit_sqe(sqe);
                         }                        
@@ -438,21 +421,28 @@ impl Platform {
                             .user_data(key as u64);
 
                         rt.plat.submit_sqe(sqe);
-                        rt.plat.submitted_accepts.insert(key, rt.current_task);
+                        rt.plat.submissions.insert(key, rt.current_task);
 
                         Poll::Pending
                     }),
 
                     // Accept submitted, query it
                     FutState::Submitted(key) => RUNTIME.with_borrow_mut(|rt| {
-                        match rt.plat.completed_accepts.remove(&key) {
-                            Some(stream) => {
+                        match rt.plat.completions.remove(&key) {
+                            Some(res) => {
                                 self.state = FutState::Done;
 
-                                let peer_addr = unsafe { &*(self.sockaddr.as_ptr() as *const libc::sockaddr) };
-                                let peer_addr = libc_addr_to_std(peer_addr);
+                                let fd = libc_result_to_std(res);
 
-                                let res = stream.map(|stream| (stream, peer_addr));
+                                let res = fd.map(|fd| {
+                                    let stream = unsafe { TcpStream::from_raw_fd(fd) };
+
+                                    let peer_addr = unsafe { &*(self.sockaddr.as_ptr() as *const libc::sockaddr) };
+                                    let peer_addr = libc_addr_to_std(peer_addr);
+
+                                    (stream, peer_addr)
+                                });
+
                                 Poll::Ready(res)
                             },
 
@@ -469,7 +459,7 @@ impl Platform {
             fn drop(&mut self) {
                 if let FutState::Submitted(key) = &self.state {
                     RUNTIME.with_borrow_mut(|rt| {
-                        if rt.plat.submitted_accepts.remove(key).is_some() {
+                        if rt.plat.submissions.remove(key).is_some() {
                             let sqe = opcode::AsyncCancel::new(*key as u64).build();
                             rt.plat.submit_sqe(sqe);
                         }                        
@@ -494,42 +484,8 @@ impl Platform {
         for cqe in self.ring.completion() {
             let key = IoKey::from(cqe.user_data() as u32);
 
-            // Is this a Timeout completion?
-            if let Some(task_id) = self.submitted_timeouts.remove(&key) {
-                self.completed_timeouts.insert(key);
-                wakeups.push(task_id);
-            }
-
-            // Is this a Recv completion?
-            else if let Some(task_id) = self.submitted_recvs.remove(&key) {
-                let res = libc_result_to_std(cqe.result()).map(|res| res as usize);
-
-                self.completed_recvs.insert(key, res);
-                wakeups.push(task_id);
-            }
-            
-            // Is this a RecvMsg completion?
-            else if let Some(task_id) = self.submitted_recv_msgs.remove(&key) {
-                let res = libc_result_to_std(cqe.result()).map(|res| res as usize);
-
-                self.completed_recv_msgs.insert(key, res);
-                wakeups.push(task_id);
-            }
-
-            // Is this a SendMsg completion?
-            else if let Some(task_id) = self.submitted_send_msgs.remove(&key) {
-                let res = libc_result_to_std(cqe.result()).map(|res| res as usize);
-
-                self.completed_send_msgs.insert(key, res);
-                wakeups.push(task_id);
-            }
-
-            // Is this an Accept completion?
-            else if let Some(task_id) = self.submitted_send_msgs.remove(&key) {
-                let fd = libc_result_to_std(cqe.result());
-                let stream = fd.map(|fd| unsafe { TcpStream::from_raw_fd(fd) });
-
-                self.completed_accepts.insert(key, stream);
+            if let Some(task_id) = self.submissions.remove(&key) {
+                self.completions.insert(key, cqe.result());
                 wakeups.push(task_id);
             }
         }
@@ -625,14 +581,7 @@ fn libc_addr_to_std(addr: &libc::sockaddr) -> SocketAddr {
         let addr = unsafe { &*(addr as *const libc::sockaddr as *const libc::sockaddr_in6) };
 
         // Get address params, converting from network to host endianness
-        let segments = array::from_fn(|i| {
-            let octet_1 = addr.sin6_addr.s6_addr[i * 2] as u16;
-            let octet_2 = addr.sin6_addr.s6_addr[(i * 2) + 1] as u16;
-
-            u16::from_be(octet_1 << 8 | octet_2)
-        });
-
-        let ip = Ipv6Addr::from(segments);
+        let ip = Ipv6Addr::from(addr.sin6_addr.s6_addr);
         let port = u16::from_be(addr.sin6_port);
         let flowinfo = u32::from_be(addr.sin6_flowinfo);
         let scope_id = u32::from_be(addr.sin6_scope_id);
