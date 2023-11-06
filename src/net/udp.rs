@@ -1,7 +1,7 @@
 use std::io::Result;
 use std::net::{SocketAddr, ToSocketAddrs};
 
-use crate::RUNTIME;
+use crate::{RUNTIME, runtime::SocketHandle};
 
 pub struct UdpSocket(std::net::UdpSocket);
 
@@ -18,30 +18,26 @@ impl UdpSocket {
     }
 
     pub async fn recv(&self, buf: &mut [u8]) -> Result<usize> {
-        self.recv_from(buf)
-            .await
-            .map(|(bytes, _addr)| bytes)
+        RUNTIME.with_borrow_mut(|rt| rt.recv_fut(SocketHandle::from(&self.0), buf, false)).await
     }
 
     pub async fn recv_from(&self, buf: &mut [u8]) -> Result<(usize, SocketAddr)> {
-        RUNTIME.with_borrow_mut(|rt| rt.recv_from_fut((&self.0).into(), buf, false)).await
+        RUNTIME.with_borrow_mut(|rt| rt.recv_from_fut(SocketHandle::from(&self.0), buf, false)).await
     }
 
     pub async fn peek(&self, buf: &mut [u8]) -> Result<usize> {
-        self.peek_from(buf)
-            .await
-            .map(|(bytes, _addr)| bytes)
+        RUNTIME.with_borrow_mut(|rt| rt.recv_fut(SocketHandle::from(&self.0), buf, true)).await
     }
 
     pub async fn peek_from(&self, buf: &mut [u8]) -> Result<(usize, SocketAddr)> {
-        RUNTIME.with_borrow_mut(|rt| rt.recv_from_fut((&self.0).into(), buf, true)).await
+        RUNTIME.with_borrow_mut(|rt| rt.recv_from_fut(SocketHandle::from(&self.0), buf, true)).await
     }
 
     pub async fn send(&self, buf: &[u8]) -> Result<usize> {
-        RUNTIME.with_borrow_mut(|rt| rt.send_fut((&self.0).into(), buf)).await
+        RUNTIME.with_borrow_mut(|rt| rt.send_fut(SocketHandle::from(&self.0), buf)).await
     }
 
     pub async fn send_to<A: ToSocketAddrs>(&self, buf: &[u8], addr: A) -> Result<usize> {
-        RUNTIME.with_borrow_mut(|rt| rt.send_to_fut((&self.0).into(), buf, addr)).await
+        RUNTIME.with_borrow_mut(|rt| rt.send_to_fut(SocketHandle::from(&self.0), buf, addr)).await
     }
 }

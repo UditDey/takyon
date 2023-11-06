@@ -1,6 +1,6 @@
 use takyon::{
     time::sleep_secs,
-    net::UdpSocket
+    net::TcpListener
 };
 
 pub fn main() {
@@ -17,18 +17,11 @@ pub fn main() {
             }
         });
 
-        let sock = UdpSocket::bind("127.0.0.1:5000").unwrap();
-        let mut buf = [0; 2048];
+        let sock = TcpListener::bind("127.0.0.1:5000").unwrap();
 
         loop {
-            let (bytes, src_addr) = sock.recv_from(&mut buf).await.unwrap();
-
-            println!("Read {:?} bytes from address {:?}", bytes, src_addr);
-            println!("Data: {:02X?}\n", &buf[..bytes]);
-
-            if &buf[..bytes] == &[0xB0, 0x0B] {
-                break;
-            }
+            let (_stream, src_addr) = sock.accept().await.unwrap();
+            println!("Got connection from {:?}", src_addr);
         }
     });
 }

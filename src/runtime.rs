@@ -5,7 +5,7 @@ use std::os::fd::AsRawFd;
 use std::pin::Pin;
 use std::future::Future;
 use std::time::Duration;
-use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
+use std::net::{SocketAddr, ToSocketAddrs, UdpSocket, TcpListener, TcpStream};
 
 use nohash::IntMap;
 
@@ -22,6 +22,13 @@ pub struct SocketHandle(pub std::os::fd::RawFd);
 
 impl From<&UdpSocket> for SocketHandle {
     fn from(value: &UdpSocket) -> Self {
+        #[cfg(unix)]
+        Self(value.as_raw_fd())
+    }
+}
+
+impl From<&TcpListener> for SocketHandle {
+    fn from(value: &TcpListener) -> Self {
         #[cfg(unix)]
         Self(value.as_raw_fd())
     }
@@ -222,8 +229,14 @@ impl Runtime {
 // Functions for IO
 // These return platform specific futures for each operation
 impl Runtime {
+    // Future for sleeping
     pub fn sleep_fut(&self, dur: Duration) -> impl Future<Output = ()> {
         self.plat.sleep_fut(dur)
+    }
+
+    // Futures for socket IO
+    pub fn recv_fut<'a>(&self, sock: SocketHandle, buf: &'a mut [u8], peek: bool) -> impl Future<Output = io::Result<usize>> + 'a {
+        self.plat.recv_fut(sock, buf, peek)
     }
 
     pub fn recv_from_fut<'a>(&self, sock: SocketHandle, buf: &'a mut [u8], peek: bool) -> impl Future<Output = io::Result<(usize, SocketAddr)>> + 'a {
@@ -242,5 +255,9 @@ impl Runtime {
             .expect("Address iterator didn't provide any addresses");
 
         self.plat.send_to_fut(sock, buf, Some(addr))
+    }
+
+    pub fn accept_fut(&self, sock: SocketHandle) -> impl Future<Output = io::Result<(TcpStream, SocketAddr)>> {
+        self.plat.accept_fut(sock)
     }
 }
