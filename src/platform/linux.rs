@@ -6,7 +6,7 @@ use std::future::Future;
 use std::time::Duration;
 use std::task::{Context, Poll};
 use std::os::fd::{AsRawFd, FromRawFd};
-use std::net::{TcpStream, SocketAddr, SocketAddrV4, SocketAddrV6, Ipv4Addr, Ipv6Addr};
+use std::net::{TcpStream, SocketAddr, SocketAddrV4, SocketAddrV6, Ipv4Addr, Ipv6Addr, Shutdown};
 
 use io_uring::{
     opcode,
@@ -203,6 +203,19 @@ pub async fn socket_connect<T: AsRawFd>(sock: &T, addr: &SocketAddr) -> io::Resu
     let addr = std_addr_to_libc(addr);
 
     let sqe = opcode::Connect::new(Fd(sock.as_raw_fd()), addr.as_ptr() as *const libc::sockaddr, addr.len() as u32).build();
+    let res = IoUringFut::new(sqe).await;
+
+    libc_result_to_std(res).map(|_| ())
+}
+
+pub async fn socket_shutdown<T: AsRawFd>(sock: &T, how: Shutdown) -> io::Result<()> {
+    let how = match how {
+        Shutdown::Read => libc::SHUT_RD,
+        Shutdown::Write => libc::SHUT_WR,
+        Shutdown::Both => libc::SHUT_RDWR
+    };
+
+    let sqe = opcode::Shutdown::new(Fd(sock.as_raw_fd()), how).build();
     let res = IoUringFut::new(sqe).await;
 
     libc_result_to_std(res).map(|_| ())

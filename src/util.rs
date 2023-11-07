@@ -1,3 +1,7 @@
+//! Utility functions for working with futures
+//! 
+//! Provides similar functionality as the utility functions in the `futures_lite` crate
+
 use std::pin::Pin;
 use std::future::Future;
 use std::task::{Context, Poll};
@@ -36,6 +40,7 @@ where
     }
 }
 
+/// Returns the result of the future that completes first, preferring `fut1` if both are ready
 pub async fn or<T, F1, F2>(fut1: F1, fut2: F2) -> T
 where
     F1: Future<Output = T>,
@@ -91,6 +96,7 @@ where
     }
 }
 
+/// Joins two futures, concurrently waiting for both to complete
 pub async fn zip<F1, F2>(fut1: F1, fut2: F2) -> (F1::Output, F2::Output)
 where
     F1: Future,
@@ -153,6 +159,7 @@ where
     }
 }
 
+/// Joins two fallible futures, concurrently waiting for both to complete or one of them to error
 pub async fn try_zip<F1, T1, F2, T2, E>(fut1: F1, fut2: F2) -> Result<(T1, T2), E>
 where
     F1: Future<Output = Result<T1, E>>,

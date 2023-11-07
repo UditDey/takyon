@@ -7,6 +7,7 @@ pub use linux::{
     socket_create,
     socket_close,
     socket_connect,
+    socket_shutdown,
     socket_recv,
     socket_recv_from,
     socket_send,

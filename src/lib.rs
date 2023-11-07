@@ -1,3 +1,81 @@
+//! A simple, single-threaded async runtime
+//! 
+//! Takyon is an async runtime for running futures and doing asynchronous IO on a single thread.
+//! It is designed to be simple, lightweight and intended for CLIs, GUI desktop apps, games,
+//! ie: any use case where a heavy, sophisticated multithreaded runtime is not required
+//! 
+//! This crate is still under development and currently only the following features are supported:
+//! - Linux support (using `io_uring`)
+//! - Spawning and joining child tasks
+//! - Sleeping
+//! - TCP and UDP network IO
+//! 
+//! The following features are planned for the future:
+//! - File IO
+//! - Windows, BSD and MacOS support
+//! - Inter-task communication such as channels, watch, notify, etc
+//! 
+//! # Examples
+//! An async TCP server:
+//! ```
+//! use takyon::net::TcpListener;
+//! 
+//! takyon::init().unwrap();
+//!
+//! takyon::run(async {
+//!     // Create a TcpListener
+//!     let listener = TcpListener::bind("127.0.0.1:5000").await.unwrap();
+//!
+//!     loop {
+//!         // Wait for incoming connections
+//!         let (stream, src_addr) = listener.accept().await.unwrap();
+//!         println!("New connection from {:?}\n", src_addr);
+//!
+//!         // Spawn task to handle connection
+//!         takyon::spawn(async move {
+//!             let mut buf = [0; 1024];
+//!
+//!             // Read data from the TcpStream
+//!             loop {
+//!                 let bytes = stream.read(&mut buf).await.unwrap();
+//!
+//!                 if bytes == 0 {
+//!                     println!("Address {:?} disconnected\n", src_addr);
+//!                     break;
+//!                 }
+//!
+//!                 println!("Read {:?} bytes from address {:?}", bytes, src_addr);
+//!                 println!("Data: {:02X?}\n", &buf[..bytes]);
+//!             }
+//!         });
+//!     }
+//! });
+//! ```
+//! 
+//! An async TCP client:
+//! ```
+//! use std::net::Shutdown;
+//! use takyon::{time::sleep_secs, net::TcpStream};
+//! 
+//! takyon::init().unwrap();
+//!
+//! takyon::run(async {
+//!     loop {
+//!         // Connect to the server
+//!         sleep_secs(1).await;
+//!         let stream = TcpStream::connect("127.0.0.1:5000").await.unwrap();
+//!
+//!         // Write some data
+//!         sleep_secs(1).await;
+//!         stream.write(&[0xAA, 0xBB, 0xCC]).await.unwrap();
+//!
+//!         // Shut down the connection
+//!         sleep_secs(1).await;
+//!         stream.shutdown(Shutdown::Both).await.unwrap();
+//!     }
+//! });
+//! ```
+
 mod error;
 mod runtime;
 mod platform;

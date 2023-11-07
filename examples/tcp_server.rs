@@ -11,7 +11,7 @@ pub fn main() {
             println!("New connection from {:?}\n", src_addr);
 
             takyon::spawn(async move {
-                let mut buf = [0; 2048];
+                let mut buf = [0; 1024];
 
                 loop {
                     let bytes = stream.read(&mut buf).await.unwrap();
