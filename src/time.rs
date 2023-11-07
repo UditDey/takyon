@@ -1,9 +1,9 @@
 use std::time::Duration;
 
-use crate::RUNTIME;
+use crate::platform;
 
 pub async fn sleep(dur: Duration) {
-    RUNTIME.with_borrow_mut(|rt| rt.sleep_fut(dur)).await;
+    platform::sleep(dur).await;
 }
 
 /// Wait for the specified number of milliseconds

@@ -1,7 +1,7 @@
 use std::io::Result;
 use std::net::{SocketAddr, ToSocketAddrs};
 
-use crate::{RUNTIME, runtime::SocketHandle};
+use crate::{platform, runtime::SocketHandle};
 
 pub struct TcpStream(std::net::TcpStream);
 
@@ -18,11 +18,11 @@ impl TcpStream {
     }
 
     pub async fn read(&self, buf: &mut [u8]) -> Result<usize> {
-        RUNTIME.with_borrow_mut(|rt| rt.recv_fut(SocketHandle::from(&self.0), buf, false)).await
+        platform::recv(SocketHandle::from(&self.0), buf, false).await
     }
 
     pub async fn write(&self, buf: &[u8]) -> Result<usize> {
-        RUNTIME.with_borrow_mut(|rt| rt.send_fut(SocketHandle::from(&self.0), buf)).await
+        platform::send_to(SocketHandle::from(&self.0), buf, None).await
     }
 }
 
@@ -41,7 +41,7 @@ impl TcpListener {
     }
 
     pub async fn accept(&self) -> Result<(TcpStream, SocketAddr)> {
-        let res = RUNTIME.with_borrow_mut(|rt| rt.accept_fut(SocketHandle::from(&self.0))).await;
+        let res = platform::accept(SocketHandle::from(&self.0)).await;
 
         // Map from std TcpStream to our own TcpStream type
         res.map(|(stream, addr)| (TcpStream(stream), addr))
