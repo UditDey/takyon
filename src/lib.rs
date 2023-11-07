@@ -3,8 +3,11 @@ mod runtime;
 mod platform;
 mod join_handle;
 
-pub mod time;
 pub mod net;
+pub mod time;
+pub mod util;
+
+pub use error::InitError;
 pub use join_handle::JoinHandle;
 
 use std::ptr;
@@ -13,7 +16,6 @@ use std::future::Future;
 use std::cell::{Cell, RefCell};
 use std::task::{Poll, Context, Waker, RawWaker, RawWakerVTable};
 
-use error::InitError;
 use runtime::{Runtime, WokenTask};
 
 thread_local! {

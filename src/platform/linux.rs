@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::future::Future;
 use std::time::Duration;
 use std::task::{Context, Poll};
-use std::os::fd::FromRawFd;
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::net::{TcpStream, SocketAddr, SocketAddrV4, SocketAddrV6, Ipv4Addr, Ipv6Addr};
 
 use io_uring::{
@@ -20,7 +20,7 @@ use nohash::IntMap;
 
 use crate::{
     RUNTIME,
-    runtime::{TaskId, SocketHandle},
+    runtime::TaskId,
     error::InitError
 };
 
@@ -39,7 +39,7 @@ impl Platform {
     pub fn new() -> Result<Self, InitError> {
         Ok(Self {
             ring: new_io_uring()?,
-            io_key_counter: 0,
+            io_key_counter: 1, // Io Keys start from 1 since 0 is reserved for fd close operations
             submissions: IntMap::default(),
             completions: IntMap::default()
         })
@@ -71,6 +71,11 @@ impl Platform {
     fn new_io_key(&mut self) -> IoKey {
         let key = self.io_key_counter;
         self.io_key_counter = key.wrapping_add(1);
+
+        // IoKey 0 is reserved for fd close operations
+        if self.io_key_counter == 0 {
+            self.io_key_counter = 1;
+        }
 
         key
     }
@@ -157,7 +162,7 @@ impl Drop for IoUringFut {
             RUNTIME.with_borrow_mut(|rt| {
                 if rt.plat.submissions.remove(key).is_some() {
                     let sqe = opcode::AsyncCancel::new(*key as u64).build();
-                    rt.plat.submit_sqe(sqe);   
+                    rt.plat.submit_sqe(sqe);
                 }
             });
         }
@@ -171,8 +176,40 @@ pub async fn sleep(dur: Duration) {
     IoUringFut::new(sqe).await;
 }
 
-pub async fn recv(sock: SocketHandle, buf: &mut [u8], peek: bool) -> io::Result<usize> {
-    let sqe = opcode::Recv::new(Fd(sock.0), buf.as_mut_ptr(), buf.len() as u32)
+pub async fn socket_create<T: FromRawFd>(ipv6: bool, udp: bool) -> io::Result<T> {
+    let domain = if ipv6 { libc::AF_INET6 } else { libc::AF_INET };
+    let socket_type = if udp { libc::SOCK_DGRAM } else { libc::SOCK_STREAM };
+    let protocol = if udp { libc::IPPROTO_UDP } else { libc::IPPROTO_TCP };
+
+    let sqe = opcode::Socket::new(domain, socket_type, protocol).build();
+    let res = IoUringFut::new(sqe).await;
+
+    let fd = libc_result_to_std(res);
+
+    fd.map(|fd| unsafe { T::from_raw_fd(fd) })
+}
+
+pub fn socket_close<T: AsRawFd>(sock: &T) {
+    RUNTIME.with_borrow_mut(|rt| {
+        let sqe = opcode::Close::new(Fd(sock.as_raw_fd()))
+            .build()
+            .user_data(0); // IoKey 0 reserved for fd closes
+
+        rt.plat.submit_sqe(sqe);   
+    });
+}
+
+pub async fn socket_connect<T: AsRawFd>(sock: &T, addr: &SocketAddr) -> io::Result<()> {
+    let addr = std_addr_to_libc(addr);
+
+    let sqe = opcode::Connect::new(Fd(sock.as_raw_fd()), addr.as_ptr() as *const libc::sockaddr, addr.len() as u32).build();
+    let res = IoUringFut::new(sqe).await;
+
+    libc_result_to_std(res).map(|_| ())
+}
+
+pub async fn socket_recv<T: AsRawFd>(sock: &T, buf: &mut [u8], peek: bool) -> io::Result<usize> {
+    let sqe = opcode::Recv::new(Fd(sock.as_raw_fd()), buf.as_mut_ptr(), buf.len() as u32)
         .flags(if peek { libc::MSG_PEEK } else { 0 })
         .build();
 
@@ -181,7 +218,7 @@ pub async fn recv(sock: SocketHandle, buf: &mut [u8], peek: bool) -> io::Result<
     libc_result_to_std(res).map(|bytes| bytes as usize)
 }
 
-pub async fn recv_from(sock: SocketHandle, buf: &mut [u8], peek: bool) -> io::Result<(usize, SocketAddr)> {
+pub async fn socket_recv_from<T: AsRawFd>(sock: &T, buf: &mut [u8], peek: bool) -> io::Result<(usize, SocketAddr)> {
     // Since a future is always pinned before use, these variable will have
     // a stable address that we can pass to the kernel without boxing
     // This approach saves us a heap allocation
@@ -203,7 +240,7 @@ pub async fn recv_from(sock: SocketHandle, buf: &mut [u8], peek: bool) -> io::Re
         msg_flags: if peek { libc::MSG_PEEK } else { 0 }
     };
     
-    let sqe = opcode::RecvMsg::new(Fd(sock.0), &mut msghdr).build();
+    let sqe = opcode::RecvMsg::new(Fd(sock.as_raw_fd()), &mut msghdr).build();
     let res = IoUringFut::new(sqe).await;
 
     libc_result_to_std(res).map(|bytes| {
@@ -214,7 +251,14 @@ pub async fn recv_from(sock: SocketHandle, buf: &mut [u8], peek: bool) -> io::Re
     })
 }
 
-pub async fn send_to(sock: SocketHandle, buf: &[u8], addr: Option<SocketAddr>) -> io::Result<usize> {
+pub async fn socket_send<T: AsRawFd>(sock: &T, buf: &[u8]) -> io::Result<usize> {
+    let sqe = opcode::Send::new(Fd(sock.as_raw_fd()), buf.as_ptr(), buf.len() as u32).build();
+    let res = IoUringFut::new(sqe).await;
+
+    libc_result_to_std(res).map(|bytes| bytes as usize)
+}
+
+pub async fn socket_send_to<T: AsRawFd>(sock: &T, buf: &[u8], addr: &SocketAddr) -> io::Result<usize> {
     // Since a future is always pinned before use, these variable will have
     // a stable address that we can pass to the kernel without boxing
     // This approach saves us a heap allocation
@@ -227,23 +271,11 @@ pub async fn send_to(sock: SocketHandle, buf: &[u8], addr: Option<SocketAddr>) -
         iov_len: buf.len()
     };
 
-    // If addr is Some, then we're working with an unconnected socket and
-    // a dst addr needs to be specified
-    // Otherwise we're working with a connected socket and there is no dst
-    // addr here
-    let mut dst_addr = addr.map(|addr| std_addr_to_libc(&addr));
+    let mut addr = std_addr_to_libc(&addr);
 
     let mut msghdr = libc::msghdr {
-        msg_name: match &mut dst_addr {
-            Some(dst_addr) => dst_addr.as_mut_ptr() as *mut _,
-            None => ptr::null_mut()
-        },
-
-        msg_namelen: match dst_addr {
-            Some(dst_addr) => dst_addr.len() as u32,
-            None => 0
-        },
-
+        msg_name: addr.as_mut_ptr() as *mut _,
+        msg_namelen: addr.len() as u32,
         msg_iov: &mut iovec,
         msg_iovlen: 1,
         msg_control: ptr::null_mut(),
@@ -251,20 +283,20 @@ pub async fn send_to(sock: SocketHandle, buf: &[u8], addr: Option<SocketAddr>) -
         msg_flags: 0
     };
 
-    let sqe = opcode::SendMsg::new(Fd(sock.0), &mut msghdr).build();
+    let sqe = opcode::SendMsg::new(Fd(sock.as_raw_fd()), &mut msghdr).build();
     let res = IoUringFut::new(sqe).await;
 
     libc_result_to_std(res).map(|bytes| bytes as usize)
 }
 
-pub async fn accept(sock: SocketHandle) -> io::Result<(TcpStream, SocketAddr)> {
+pub async fn socket_accept<T: AsRawFd>(sock: &T) -> io::Result<(TcpStream, SocketAddr)> {
     // Create buffer with sufficient space to hold the largest sockaddr that we're expecting
     let mut sockaddr = [0u8; MAX_LIBC_SOCKADDR_SIZE];
     let mut addrlen = MAX_LIBC_SOCKADDR_SIZE as libc::socklen_t;
 
     let libc_addr = sockaddr.as_mut_ptr() as *mut libc::sockaddr;
 
-    let sqe = opcode::Accept::new(Fd(sock.0), libc_addr, &mut addrlen).build();
+    let sqe = opcode::Accept::new(Fd(sock.as_raw_fd()), libc_addr, &mut addrlen).build();
     let res = IoUringFut::new(sqe).await;
 
     let fd = libc_result_to_std(res);

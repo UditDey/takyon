@@ -1,6 +1,5 @@
 use std::mem;
 use std::any::Any;
-use std::os::fd::AsRawFd;
 use std::pin::Pin;
 use std::future::Future;
 
@@ -13,15 +12,6 @@ use crate::{
 };
 
 pub type TaskId = u32;
-
-#[cfg(unix)]
-pub struct SocketHandle(pub std::os::fd::RawFd);
-
-impl<T: AsRawFd> From<&T> for SocketHandle {
-    fn from(value: &T) -> Self {
-        Self(value.as_raw_fd())
-    }
-}
 
 type Task = Pin<Box<dyn Future<Output = Box<dyn Any>>>>;
 
@@ -51,7 +41,7 @@ impl Runtime {
         let plat = Platform::new()?;
 
         Ok(Self {
-            task_id_counter: 1,
+            task_id_counter: 1, // Task IDs start from 1 since 0 is reserved for root task
             current_task: 0,
             tasks: IntMap::default(),
             join_handles: IntMap::default(),

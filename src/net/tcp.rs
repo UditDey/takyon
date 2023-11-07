@@ -1,16 +1,72 @@
 use std::io::Result;
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::mem::ManuallyDrop;
+use std::net::{SocketAddr, ToSocketAddrs, TcpStream as StdTcpStream};
 
-use crate::{platform, runtime::SocketHandle};
+use crate::{
+    util::try_zip,
+    platform::{
+        socket_create,
+        socket_close,
+        socket_connect,
+        socket_recv,
+        socket_send,
+        socket_accept
+    }
+};
 
-pub struct TcpStream(std::net::TcpStream);
+pub struct TcpStream(ManuallyDrop<std::net::TcpStream>);
 
 impl TcpStream {
-    pub fn connect<A: ToSocketAddrs>(addr: A) -> Result<Self> {
-        let stream = std::net::TcpStream::connect(addr)?;
-        stream.set_nonblocking(true)?;
+    pub async fn connect<A: ToSocketAddrs>(addr: A) -> Result<Self> {
+        let addr_iter = addr.to_socket_addrs().expect("Couldn't get address iterator");
 
-        Ok(Self(stream))
+        // Since each address can be either IPv4 or IPv6, we create one socket for each type
+        let (sock_v4, sock_v6) = try_zip(
+            async {
+                let stream = socket_create::<StdTcpStream>(false, false).await;
+                stream.map(|stream| ManuallyDrop::new(stream))
+            },
+            
+            async {
+                let stream = socket_create::<StdTcpStream>(true, false).await;
+                stream.map(|stream| ManuallyDrop::new(stream))
+            },
+        ).await?;
+
+        let mut res = None;
+
+        for addr in addr_iter {
+            match addr {
+                SocketAddr::V4(_) => {
+                    match socket_connect(&*sock_v4, &addr).await {
+                        Ok(()) => {
+                            socket_close(&*sock_v6);
+                            sock_v4.set_nonblocking(true)?;
+                            return Ok(Self(sock_v4));
+                        },
+
+                        Err(err) => res = Some(err)
+                    }
+                },
+
+                SocketAddr::V6(_) => {
+                    match socket_connect(&*sock_v6, &addr).await {
+                        Ok(()) => {
+                            socket_close(&*sock_v4);
+                            sock_v6.set_nonblocking(true)?;
+                            return Ok(Self(sock_v6));
+                        },
+
+                        Err(err) => res = Some(err)
+                    }
+                }
+            }
+        }
+
+        match res {
+            Some(err) => Err(err),
+            None => panic!("Address iterator didn't provide any addresses")
+        }
     }
 
     pub fn std(&self) -> &std::net::TcpStream {
@@ -18,22 +74,28 @@ impl TcpStream {
     }
 
     pub async fn read(&self, buf: &mut [u8]) -> Result<usize> {
-        platform::recv(SocketHandle::from(&self.0), buf, false).await
+        socket_recv(&*self.0, buf, false).await
     }
 
     pub async fn write(&self, buf: &[u8]) -> Result<usize> {
-        platform::send_to(SocketHandle::from(&self.0), buf, None).await
+        socket_send(&*self.0, buf).await
     }
 }
 
-pub struct TcpListener(std::net::TcpListener);
+impl Drop for TcpStream {
+    fn drop(&mut self) {
+        socket_close(&*self.0);
+    }
+}
+
+pub struct TcpListener(ManuallyDrop<std::net::TcpListener>);
 
 impl TcpListener {
-    pub fn bind<A: ToSocketAddrs>(addr: A) -> Result<Self> {
+    pub async fn bind<A: ToSocketAddrs>(addr: A) -> Result<Self> {
         let listener = std::net::TcpListener::bind(addr)?;
         listener.set_nonblocking(true)?;
 
-        Ok(Self(listener))
+        Ok(Self(ManuallyDrop::new(listener)))
     }
 
     pub fn std(&self) -> &std::net::TcpListener {
@@ -41,9 +103,15 @@ impl TcpListener {
     }
 
     pub async fn accept(&self) -> Result<(TcpStream, SocketAddr)> {
-        let res = platform::accept(SocketHandle::from(&self.0)).await;
+        let res = socket_accept(&*self.0).await;
 
         // Map from std TcpStream to our own TcpStream type
-        res.map(|(stream, addr)| (TcpStream(stream), addr))
+        res.map(|(stream, addr)| (TcpStream(ManuallyDrop::new(stream)), addr))
+    }
+}
+
+impl Drop for TcpListener {
+    fn drop(&mut self) {
+        socket_close(&*self.0);
     }
 }

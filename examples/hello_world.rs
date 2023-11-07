@@ -4,7 +4,7 @@ pub fn main() {
     takyon::init().unwrap();
 
     takyon::run(async {
-        let sock = TcpListener::bind("127.0.0.1:5000").unwrap();
+        let sock = TcpListener::bind("127.0.0.1:5000").await.unwrap();
 
         loop {
             let (stream, src_addr) = sock.accept().await.unwrap();

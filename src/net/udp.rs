@@ -1,7 +1,12 @@
 use std::io::Result;
 use std::net::{SocketAddr, ToSocketAddrs};
 
-use crate::{platform, runtime::SocketHandle};
+use crate::platform::{
+    socket_recv,
+    socket_recv_from,
+    socket_send,
+    socket_send_to
+};
 
 pub struct UdpSocket(std::net::UdpSocket);
 
@@ -18,32 +23,32 @@ impl UdpSocket {
     }
 
     pub async fn recv(&self, buf: &mut [u8]) -> Result<usize> {
-        platform::recv(SocketHandle::from(&self.0), buf, false).await
+        socket_recv(&self.0, buf, false).await
     }
 
     pub async fn recv_from(&self, buf: &mut [u8]) -> Result<(usize, SocketAddr)> {
-        platform::recv_from(SocketHandle::from(&self.0), buf, false).await
+        socket_recv_from(&self.0, buf, false).await
     }
 
     pub async fn peek(&self, buf: &mut [u8]) -> Result<usize> {
-        platform::recv(SocketHandle::from(&self.0), buf, true).await
+        socket_recv(&self.0, buf, true).await
     }
 
     pub async fn peek_from(&self, buf: &mut [u8]) -> Result<(usize, SocketAddr)> {
-        platform::recv_from(SocketHandle::from(&self.0), buf, true).await
+        socket_recv_from(&self.0, buf, true).await
     }
 
     pub async fn send(&self, buf: &[u8]) -> Result<usize> {
-        platform::send_to(SocketHandle::from(&self.0), buf, None).await
+        socket_send(&self.0, buf).await
     }
 
     pub async fn send_to<A: ToSocketAddrs>(&self, buf: &[u8], addr: A) -> Result<usize> {
         let addr = addr
             .to_socket_addrs()
-            .expect("Could not get address iterator")
+            .expect("Couldn't get address iterator")
             .next()
             .expect("Address iterator didn't provide any addresses");
 
-        platform::send_to(SocketHandle::from(&self.0), buf, Some(addr)).await
+        socket_send_to(&self.0, buf, &addr).await
     }
 }

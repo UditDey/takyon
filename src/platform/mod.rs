@@ -2,4 +2,15 @@
 mod linux;
 
 #[cfg(target_os = "linux")]
-pub use linux::{sleep, recv, recv_from, send_to, accept, Platform};
+pub use linux::{
+    sleep,
+    socket_create,
+    socket_close,
+    socket_connect,
+    socket_recv,
+    socket_recv_from,
+    socket_send,
+    socket_send_to,
+    socket_accept,
+    Platform
+};
