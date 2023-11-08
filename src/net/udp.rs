@@ -30,6 +30,15 @@ impl UdpSocket {
     /// [`set_nonblocking(true)`](std::net::UdpSocket::set_nonblocking) on it.
     /// 
     /// See the [`std` docs](std::net::UdpSocket::bind) for more info
+    /// 
+    /// # Blocking Warning
+    /// When getting addresses from the provided `ToSocketAddrs` object, DNS lookups may be performed,
+    /// which can block the thread and prevent other tasks from executing. To prevent this, pass only
+    /// resolved exact IP addresses and not strings
+    /// ```
+    /// // Any other `SocketAddr::from()` or `ToSocketAddrs` impl can also be used
+    /// UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 5000))).await;
+    /// ```
     pub async fn bind<A: ToSocketAddrs>(addr: A) -> Result<Self> {
         let sock = std::net::UdpSocket::bind(addr)?;
         sock.set_nonblocking(true)?;
@@ -41,6 +50,15 @@ impl UdpSocket {
     /// to send data and also applies filters to only receive data from the specified address
     /// 
     /// See the [`std` docs](std::net::UdpSocket::connect) for more info
+    /// 
+    /// # Blocking Warning
+    /// When getting addresses from the provided `ToSocketAddrs` object, DNS lookups may be performed,
+    /// which can block the thread and prevent other tasks from executing. To prevent this, pass only
+    /// resolved exact IP addresses and not strings
+    /// ```
+    /// // Any other `SocketAddr::from()` or `ToSocketAddrs` impl can also be used
+    /// socket.connect(SocketAddr::from(([127, 0, 0, 1], 5000))).await;
+    /// ```
     pub async fn connect<A: ToSocketAddrs>(&self, addr: A) -> Result<()> {
         let addr_iter = addr.to_socket_addrs().expect("Couldn't get address iterator");
 
