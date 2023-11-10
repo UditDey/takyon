@@ -2,7 +2,9 @@ use std::io;
 use std::mem;
 use std::ptr;
 use std::pin::Pin;
+use std::fs::File;
 use std::path::Path;
+use std::ffi::CString;
 use std::future::Future;
 use std::time::Duration;
 use std::task::{Context, Poll};
@@ -178,7 +180,7 @@ pub async fn sleep(dur: Duration) {
     IoUringFut::new(sqe).await;
 }
 
-pub async fn file_open<T: FromRawFd>(path: &Path, opts: &OpenOptions) -> io::Result<T> {
+pub async fn file_open(path: &Path, opts: &OpenOptions) -> io::Result<File> {
     let mut flags = match (opts.read, opts.write) {
         (true, false) => libc::O_RDONLY,
         (false, true) => libc::O_WRONLY,
@@ -203,16 +205,40 @@ pub async fn file_open<T: FromRawFd>(path: &Path, opts: &OpenOptions) -> io::Res
     }
 
     let dirfd = Fd(libc::AT_FDCWD);
-    let path = path.as_os_str().as_bytes();
+    let path = CString::new(path.as_os_str().as_bytes()).expect("Provided path contains internal null char");
 
-    let sqe = opcode::OpenAt::new(dirfd, (*path).as_ptr() as *const _)
+    let sqe = opcode::OpenAt::new(dirfd, path.as_ptr() as *const _)
         .flags(flags)
         .mode(0o666)
         .build();
 
     let res = IoUringFut::new(sqe).await;
 
-    libc_result_to_std(res).map(|fd| unsafe { T::from_raw_fd(fd) })
+    libc_result_to_std(res).map(|fd| unsafe { File::from_raw_fd(fd) })
+}
+
+pub async fn file_read(file: &File, buf: &mut [u8]) -> io::Result<usize> {
+    let sqe = opcode::Read::new(Fd(file.as_raw_fd()), buf.as_mut_ptr(), buf.len() as u32).build();
+    let res = IoUringFut::new(sqe).await;
+
+    libc_result_to_std(res).map(|bytes| bytes as usize)
+}
+
+pub async fn file_write(file: &File, buf: &[u8]) -> io::Result<usize> {
+    let sqe = opcode::Write::new(Fd(file.as_raw_fd()), buf.as_ptr(), buf.len() as u32).build();
+    let res = IoUringFut::new(sqe).await;
+
+    libc_result_to_std(res).map(|bytes| bytes as usize)
+}
+
+pub fn file_close(file: &File) {
+    RUNTIME.with_borrow_mut(|rt| {
+        let sqe = opcode::Close::new(Fd(file.as_raw_fd()))
+            .build()
+            .user_data(0); // IoKey 0 reserved for fd closes
+
+        rt.plat.submit_sqe(sqe);   
+    });
 }
 
 pub async fn socket_create<T: FromRawFd>(ipv6: bool, udp: bool) -> io::Result<T> {
@@ -382,8 +408,15 @@ fn new_io_uring() -> Result<IoUring, InitError> {
     let req_opcodes = [
         ("AsyncCancel", opcode::AsyncCancel::CODE),
         ("Timeout", opcode::Timeout::CODE),
+        ("Socket", opcode::Socket::CODE),
+        ("Connect", opcode::Connect::CODE),
         ("RecvMsg", opcode::RecvMsg::CODE),
-        ("SendMsg", opcode::SendMsg::CODE)
+        ("SendMsg", opcode::SendMsg::CODE),
+        ("Shutdown", opcode::Shutdown::CODE),
+        ("OpenAt", opcode::OpenAt::CODE),
+        ("Read", opcode::Read::CODE),
+        ("Write", opcode::Write::CODE),
+        ("Close", opcode::Close::CODE)
     ];
 
     for (name, code) in req_opcodes {

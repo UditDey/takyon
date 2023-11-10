@@ -7,9 +7,11 @@ pub fn main() {
         let opts = OpenOptions::new()
             .read(true)
             .write(true)
-            .create(true);
+            .create(true)
+            .truncate(true);
 
-        let path = "/home/uditd/Desktop/Projects/takyon/test_file";//std::path::PathBuf::from("/home/uditd/Desktop/Projects/takyon/test_file");
-        let file = File::open(&path, &opts).await.unwrap();
+        let file = File::open("test_file", &opts).await.unwrap();
+
+        file.write(b"hello").await.unwrap();
     });
 }
