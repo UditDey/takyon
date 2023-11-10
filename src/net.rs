@@ -1,3 +1,8 @@
+//! TCP and UDP networking
+//! 
+//! This module provides functionality for async IO over TCP and UDP sockets, and aims
+//! to provide APIs identical to the equivalent `std` types
+
 use std::io::Result;
 use std::mem::ManuallyDrop;
 use std::net::{SocketAddr, ToSocketAddrs, Shutdown, TcpStream as StdTcpStream};
