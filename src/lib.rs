@@ -81,6 +81,7 @@ mod runtime;
 mod platform;
 mod join_handle;
 
+pub mod fs;
 pub mod net;
 pub mod time;
 pub mod util;

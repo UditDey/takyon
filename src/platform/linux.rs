@@ -2,10 +2,11 @@ use std::io;
 use std::mem;
 use std::ptr;
 use std::pin::Pin;
+use std::path::Path;
 use std::future::Future;
 use std::time::Duration;
 use std::task::{Context, Poll};
-use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::{fd::{AsRawFd, FromRawFd}, unix::ffi::OsStrExt};
 use std::net::{TcpStream, SocketAddr, SocketAddrV4, SocketAddrV6, Ipv4Addr, Ipv6Addr, Shutdown};
 
 use io_uring::{
@@ -20,6 +21,7 @@ use nohash::IntMap;
 
 use crate::{
     RUNTIME,
+    fs::OpenOptions,
     runtime::TaskId,
     error::InitError
 };
@@ -174,6 +176,43 @@ pub async fn sleep(dur: Duration) {
     let sqe = opcode::Timeout::new(&timespec).build();
 
     IoUringFut::new(sqe).await;
+}
+
+pub async fn file_open<T: FromRawFd>(path: &Path, opts: &OpenOptions) -> io::Result<T> {
+    let mut flags = match (opts.read, opts.write) {
+        (true, false) => libc::O_RDONLY,
+        (false, true) => libc::O_WRONLY,
+        (true, true) => libc::O_RDWR,
+        (false, false) => 0
+    };
+
+    if opts.append {
+        flags |= libc::O_APPEND;
+    }
+
+    if opts.truncate {
+        flags |= libc::O_TRUNC;
+    }
+
+    if opts.create || opts.create_new {
+        flags |= libc::O_CREAT;
+    }
+
+    if opts.create_new {
+        flags |= libc::O_EXCL;
+    }
+
+    let dirfd = Fd(libc::AT_FDCWD);
+    let path = path.as_os_str().as_bytes();
+
+    let sqe = opcode::OpenAt::new(dirfd, (*path).as_ptr() as *const _)
+        .flags(flags)
+        .mode(0o666)
+        .build();
+
+    let res = IoUringFut::new(sqe).await;
+
+    libc_result_to_std(res).map(|fd| unsafe { T::from_raw_fd(fd) })
 }
 
 pub async fn socket_create<T: FromRawFd>(ipv6: bool, udp: bool) -> io::Result<T> {
